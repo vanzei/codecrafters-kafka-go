@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bytes"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
@@ -37,7 +37,6 @@ func handleConnection(conn net.Conn) {
 
 	defer conn.Close()
 	for {
-		received := bytes.Buffer{}
 		buf := make([]byte, 1024)
 
 		_, err := conn.Read(buf)
@@ -46,9 +45,25 @@ func handleConnection(conn net.Conn) {
 			break
 		}
 
-		received.Write(buf)
+		// Extract correlation_id from the incoming message
+		correlation_id := binary.BigEndian.Uint32(buf[8:12])
 
-		conn.Write([]byte{0, 0, 0, 0, 0, 0, 0, 7})
+		// Construct the proper response
+		response := make([]byte, 8)
+
+		// correlation_id: same as received
+		binary.BigEndian.PutUint32(response[0:4], 0)
+		// correlation_id: same as received
+		binary.BigEndian.PutUint32(response[4:8], correlation_id)
+
+		// Send the response back to the client
+		_, err = conn.Write(response)
+		if err != nil {
+			fmt.Println("Error writing to connection", err)
+			return
+		}
+
+		fmt.Println("Sent response with correlation_id:", correlation_id)
 
 	}
 }
