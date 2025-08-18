@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -33,37 +34,54 @@ func main() {
 	}
 }
 
+type Header struct {
+	Size          int32
+	APIKey        int16
+	APIVersion    int16
+	CorrelationID int32
+}
+
+const (
+	CORRELATION_ID_LENGHT    = 4
+	API_VERSION_LENGHT       = 2
+	REQUEST_API_KEY_SIZE     = 2
+	REQUEST_API_VERSION_SIZE = 2
+	MESSAGE_SIZE             = 4
+)
+
 func handleConnection(conn net.Conn) {
 
 	defer conn.Close()
 	for {
 		buf := make([]byte, 1024)
 
-		_, err := conn.Read(buf)
+		n, err := conn.Read(buf)
 		if err != nil {
 			fmt.Println("Error reading from connection: ", err.Error())
 			break
 		}
 
-		// Extract correlation_id from the incoming message
-		correlation_id := binary.BigEndian.Uint32(buf[8:12])
+		response := make([]byte, 10)
+		var header Header
+		rdr := bytes.NewReader(buf[:n])
+		if err := binary.Read(rdr, binary.BigEndian, &header); err != nil {
+			fmt.Println("Failed to parse header:", err)
+			continue
+		}
+		fmt.Println(buf[:n])
 
-		// Construct the proper response
-		response := make([]byte, 8)
+		// Build base response: placeholder + correlation id
+		binary.BigEndian.PutUint32(response[0:4], uint32(0))
+		binary.BigEndian.PutUint32(response[4:8], uint32(header.CorrelationID))
+		// Always set error_code = 35 for this stage
+		binary.BigEndian.PutUint16(response[8:10], uint16(35))
+		fmt.Println(response)
 
-		// correlation_id: same as received
-		binary.BigEndian.PutUint32(response[0:4], 0)
-		// correlation_id: same as received
-		binary.BigEndian.PutUint32(response[4:8], correlation_id)
-
-		// Send the response back to the client
 		_, err = conn.Write(response)
 		if err != nil {
 			fmt.Println("Error writing to connection", err)
 			return
 		}
-
-		fmt.Println("Sent response with correlation_id:", correlation_id)
 
 	}
 }
