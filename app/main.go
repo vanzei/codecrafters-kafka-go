@@ -1,11 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
+	"time"
 )
 
 // Ensures gofmt doesn't remove the "net" and "os" imports in stage 1 (feel free to remove this!)
@@ -34,54 +34,153 @@ func main() {
 	}
 }
 
-type Header struct {
-	Size          int32
-	APIKey        int16
-	APIVersion    int16
-	CorrelationID int32
-}
-
-const (
-	CORRELATION_ID_LENGHT    = 4
-	API_VERSION_LENGHT       = 2
-	REQUEST_API_KEY_SIZE     = 2
-	REQUEST_API_VERSION_SIZE = 2
-	MESSAGE_SIZE             = 4
-)
-
 func handleConnection(conn net.Conn) {
 
 	defer conn.Close()
-	for {
-		buf := make([]byte, 1024)
 
-		n, err := conn.Read(buf)
-		if err != nil {
-			fmt.Println("Error reading from connection: ", err.Error())
-			break
-		}
+	conn.SetReadDeadline(time.Now().Add(ReadTimeout))
+	conn.SetWriteDeadline(time.Now().Add(WriteTimeout))
 
-		response := make([]byte, 10)
-		var header Header
-		rdr := bytes.NewReader(buf[:n])
-		if err := binary.Read(rdr, binary.BigEndian, &header); err != nil {
-			fmt.Println("Failed to parse header:", err)
-			continue
-		}
-		fmt.Println(buf[:n])
+	fmt.Println("New connection from %s: %v]\n", conn.RemoteAddr())
 
-		// Build base response: placeholder + correlation id
-		binary.BigEndian.PutUint32(response[0:4], uint32(0))
-		binary.BigEndian.PutUint32(response[4:8], uint32(header.CorrelationID))
-		// Always set error_code = 35 for this stage
-		binary.BigEndian.PutUint16(response[8:10], uint16(35))
-		fmt.Println(response)
-
-		_, err = conn.Write(response)
-		if err != nil {
-			fmt.Println("Error writing to connection", err)
-			return
-		}
-
+	request, err := readRequest(conn)
+	if err != nil {
+		fmt.Println("Error reading Resuqe from %s: %v\n", conn.RemoteAddr(), err)
 	}
+
+	err = handleKafkaRequest(conn, request)
+	if err != nil {
+		fmt.Println("Error handling request from %s: %v\n", conn.RemoteAddr(), err)
+	}
+
+}
+
+func handleKafkaRequest(conn net.Conn, request *KafkaRequest) error {
+	switch request.RequestAPIKey {
+	case ApiVersionAPIKEY:
+		return handleApiVersionsRequest(conn, request)
+	default:
+		return fmt.Errorf("Unsupported API Key: %d", RequestAPIKeyLenght)
+	}
+}
+
+func handleApiVersionsRequest(conn net.Conn, request *KafkaRequest) error {
+	minVersion := int16(0)
+	maxVersion := int16(4)
+
+	response := &ApiVersionV4Response{
+		CorrelationID:  request.CorrelationID,
+		ErrorCode:      NoneCode,
+		ApiKeys:        []int16{ApiVersionAPIKEY, minVersion, maxVersion},
+		MinVersion:     minVersion,
+		MaxVersion:     maxVersion,
+		TaggedFields:   byte(0),
+		ThrottleTimeMs: 0,
+	}
+
+	if request.RequestAPIVersion < 0 || request.RequestAPIVersion > 4 {
+		response.ErrorCode = UnsupportedVersionCode
+	}
+	return writeApiVersionsResponse(conn, response)
+}
+func writeApiVersionsResponse(conn net.Conn, response *ApiVersionV4Response) error {
+	fmt.Printf("Writing ApiVersions response: %+v\n", response)
+	// Serialize the response
+
+	buff := make([]byte, 0)
+
+	// Write the correlation ID
+	corrId := make([]byte, 4)
+	binary.BigEndian.PutUint32(corrId, uint32(response.CorrelationID))
+	buff = append(buff, corrId...)
+
+	// Write the error code
+	errorCode := make([]byte, 2)
+	binary.BigEndian.PutUint16(errorCode, uint16(response.ErrorCode))
+	buff = append(buff, errorCode...)
+
+	// ApiKeys array (length + each key/version pair)
+	apiKeysLen := make([]byte, 4)
+	binary.BigEndian.PutUint32(apiKeysLen, uint32(len(response.ApiKeys)))
+	buff = append(buff, apiKeysLen...)
+	for _, apiKey := range response.ApiKeys {
+		key := make([]byte, 2)
+		binary.BigEndian.PutUint16(key, uint16(apiKey))
+		buff = append(buff, key...)
+		// Add min/max version for each key if needed
+	}
+
+	// TaggedFields
+	buff = append(buff, response.TaggedFields)
+
+	// ThrottleTimeMs (if needed)
+	throttle := make([]byte, 4)
+	binary.BigEndian.PutUint32(throttle, uint32(response.ThrottleTimeMs))
+	buff = append(buff, throttle...)
+
+	// Prepend the total length
+	totalLen := make([]byte, 4)
+	binary.BigEndian.PutUint32(totalLen, uint32(len(buff)))
+	buff = append(totalLen, buff...)
+
+	// Write to connection
+	_, err := conn.Write(buff)
+	return err
+}
+
+func readRequest(conn net.Conn) (*KafkaRequest, error) {
+	// Read the request from the connection
+	lenBuff := make([]byte, 4)
+	if _, err := conn.Read(lenBuff); err != nil {
+		return nil, fmt.Errorf("failed to read message size: %w", err)
+	}
+
+	// calculate message size
+	lenght := int(binary.BigEndian.Uint32(lenBuff))
+
+	msgBuff := make([]byte, lenght)
+	if _, err := conn.Read(msgBuff); err != nil {
+		return nil, fmt.Errorf("failed to read message: %w", err)
+	}
+
+	// Parse the request
+	offset := 0
+	apiKey := int16(binary.BigEndian.Uint16(msgBuff[offset : offset+2]))
+	offset += 2
+	apiVersion := int16(binary.BigEndian.Uint16(msgBuff[offset : offset+2]))
+	offset += 2
+	correlationID := int32(binary.BigEndian.Uint32(msgBuff[offset : offset+4]))
+	offset += 4
+	clientIdLength := int16(binary.BigEndian.Uint16(msgBuff[offset : offset+2]))
+	offset += 2
+	clientID := string(msgBuff[offset : offset+int(clientIdLength)])
+
+	if clientIdLength > 0 {
+		clientID = string(msgBuff[offset : offset+int(clientIdLength)])
+		offset += int(clientIdLength)
+	}
+
+	return &KafkaRequest{
+		RequestAPIKey:     apiKey,
+		RequestAPIVersion: apiVersion,
+		CorrelationID:     correlationID,
+		ClientID:          clientID,
+	}, nil
+
+	// Currently not part of the solution
+	// // Empty tagged fields for now
+	// taggedFields := byte(0)
+	// offset += 1
+
+	// bodyClientIdLength := int(msgBuff[offset])
+	// offset += 1
+
+	// bodyContent := string(msgBuff[offset : offset+int(bodyClientIdLength)])
+	// offset += bodyClientIdLength
+
+	// clientSWVersion := int(msgBuff[offset])
+	// offset += 1
+
+	// clientSWVersionString := string(msgBuff[offset:lenght])
+
 }
