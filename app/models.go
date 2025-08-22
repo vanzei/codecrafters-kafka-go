@@ -9,12 +9,16 @@ type KafkaRequest struct {
 }
 
 type ApiVersionV4Response struct {
-	CorrelationID  int32
-	ErrorCode      int16
-	ApiKeys        []int16
-	ApiKey         int16
-	MinVersion     int16
-	MaxVersion     int16
-	TaggedFields   byte
-	ThrottleTimeMs int32
+	CorrelationID         int32
+	ErrorCode             int16
+	ApiVersionArrayLength byte
+	ApiKeys               []ApiKeyVersion
+	TaggedFields          byte
+	ThrottleTimeMs        int32
+}
+
+type ApiKeyVersion struct {
+	ApiKey     int16
+	MinVersion int16
+	MaxVersion int16
 }

@@ -41,16 +41,16 @@ func handleConnection(conn net.Conn) {
 	conn.SetReadDeadline(time.Now().Add(ReadTimeout))
 	conn.SetWriteDeadline(time.Now().Add(WriteTimeout))
 
-	fmt.Println("New connection from %s: %v]\n", conn.RemoteAddr())
+	//fmt.Println("New connection from %s: %v]\n", conn.RemoteAddr())
 
 	request, err := readRequest(conn)
 	if err != nil {
-		fmt.Println("Error reading Resuqe from %s: %v\n", conn.RemoteAddr(), err)
+		//fmt.Println("Error reading Resuqe from %s: %v\n", conn.RemoteAddr(), err)
 	}
 
 	err = handleKafkaRequest(conn, request)
 	if err != nil {
-		fmt.Println("Error handling request from %s: %v\n", conn.RemoteAddr(), err)
+		//fmt.Println("Error handling request from %s: %v\n", conn.RemoteAddr(), err)
 	}
 
 }
@@ -65,17 +65,23 @@ func handleKafkaRequest(conn net.Conn, request *KafkaRequest) error {
 }
 
 func handleApiVersionsRequest(conn net.Conn, request *KafkaRequest) error {
-	minVersion := int16(0)
-	maxVersion := int16(4)
+
+	// List all supported API keys
+	apiKeys := []ApiKeyVersion{
+		{ApiKey: 18, MinVersion: 0, MaxVersion: 4}, // ApiVersions
+		// Add more keys as needed for compatibility
+		// {ApiKey: 3, MinVersion: 0, MaxVersion: 9}, // Metadata
+		// {ApiKey: 0, MinVersion: 0, MaxVersion: 8}, // Produce
+		// {ApiKey: 1, MinVersion: 0, MaxVersion: 11}, // Fetch
+	}
 
 	response := &ApiVersionV4Response{
-		CorrelationID:  request.CorrelationID,
-		ErrorCode:      NoneCode,
-		ApiKeys:        []int16{ApiVersionAPIKEY, minVersion, maxVersion},
-		MinVersion:     minVersion,
-		MaxVersion:     maxVersion,
-		TaggedFields:   byte(0),
-		ThrottleTimeMs: 0,
+		CorrelationID:         request.CorrelationID,
+		ErrorCode:             NoneCode,
+		ApiVersionArrayLength: byte(len(apiKeys)),
+		ApiKeys:               apiKeys,
+		TaggedFields:          byte(0),
+		ThrottleTimeMs:        0,
 	}
 
 	if request.RequestAPIVersion < 0 || request.RequestAPIVersion > 4 {
@@ -84,7 +90,7 @@ func handleApiVersionsRequest(conn net.Conn, request *KafkaRequest) error {
 	return writeApiVersionsResponse(conn, response)
 }
 func writeApiVersionsResponse(conn net.Conn, response *ApiVersionV4Response) error {
-	fmt.Printf("Writing ApiVersions response: %+v\n", response)
+	fmt.Printf("Writing ApiVersions response:\n %+v\n", response)
 	// Serialize the response
 
 	buff := make([]byte, 0)
@@ -99,32 +105,48 @@ func writeApiVersionsResponse(conn net.Conn, response *ApiVersionV4Response) err
 	binary.BigEndian.PutUint16(errorCode, uint16(response.ErrorCode))
 	buff = append(buff, errorCode...)
 
-	// ApiKeys array (length + each key/version pair)
-	apiKeysLen := make([]byte, 4)
-	binary.BigEndian.PutUint32(apiKeysLen, uint32(len(response.ApiKeys)))
-	buff = append(buff, apiKeysLen...)
+	// // Number of API Versions (1 byte) - compact array format (length + 1)
+	// // Write the arraylen code
+	// ApiVLen := []byte{byte(response.ApiVersionArrayLength)}
+	// buff = append(buff, ApiVLen...)
+
+	// ApiKeys array (compact array: varint length, then each key/min/max)
+	// For one key, varint is just 1
+	buff = append(buff, byte(len(response.ApiKeys)+1)) // compact array length (VARINT, 1 key)
 	for _, apiKey := range response.ApiKeys {
 		key := make([]byte, 2)
-		binary.BigEndian.PutUint16(key, uint16(apiKey))
+		binary.BigEndian.PutUint16(key, uint16(apiKey.ApiKey))
 		buff = append(buff, key...)
-		// Add min/max version for each key if needed
+
+		minV := make([]byte, 2)
+		binary.BigEndian.PutUint16(minV, uint16(apiKey.MinVersion))
+		buff = append(buff, minV...)
+
+		maxV := make([]byte, 2)
+		binary.BigEndian.PutUint16(maxV, uint16(apiKey.MaxVersion))
+		buff = append(buff, maxV...)
+		fmt.Println(buff)
 	}
 
-	// TaggedFields
-	buff = append(buff, response.TaggedFields)
+	// TaggedFields (VARINT, usually 0)
+	buff = append(buff, 0)
 
-	// ThrottleTimeMs (if needed)
+	// ThrottleTimeMs
 	throttle := make([]byte, 4)
 	binary.BigEndian.PutUint32(throttle, uint32(response.ThrottleTimeMs))
 	buff = append(buff, throttle...)
 
-	// Prepend the total length
+	// Final TaggedFields (VARINT, usually 0)
+	buff = append(buff, 0)
+
+	// Calculate the size before prepending
 	totalLen := make([]byte, 4)
 	binary.BigEndian.PutUint32(totalLen, uint32(len(buff)))
-	buff = append(totalLen, buff...)
+	finalBuff := append(totalLen, buff...)
 
+	fmt.Printf("Writing response of length %d: %v\n", len(buff), buff)
 	// Write to connection
-	_, err := conn.Write(buff)
+	_, err := conn.Write(finalBuff)
 	return err
 }
 
@@ -160,6 +182,7 @@ func readRequest(conn net.Conn) (*KafkaRequest, error) {
 		offset += int(clientIdLength)
 	}
 
+	fmt.Printf("Parsed request: API Key: %d, Version: %d, Correlation ID: %d, Client ID: %s\n", apiKey, apiVersion, correlationID, clientID)
 	return &KafkaRequest{
 		RequestAPIKey:     apiKey,
 		RequestAPIVersion: apiVersion,
