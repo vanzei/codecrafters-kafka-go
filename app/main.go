@@ -41,16 +41,16 @@ func handleConnection(conn net.Conn) {
 	conn.SetReadDeadline(time.Now().Add(ReadTimeout))
 	conn.SetWriteDeadline(time.Now().Add(WriteTimeout))
 
-	//fmt.Println("New connection from %s: %v]\n", conn.RemoteAddr())
+	fmt.Printf("New connection from %s]\n", conn.RemoteAddr())
 
 	request, err := readRequest(conn)
 	if err != nil {
-		//fmt.Println("Error reading Resuqe from %s: %v\n", conn.RemoteAddr(), err)
+		fmt.Printf("Error reading Resuqe from %s: %v\n", conn.RemoteAddr(), err)
 	}
 
 	err = handleKafkaRequest(conn, request)
 	if err != nil {
-		//fmt.Println("Error handling request from %s: %v\n", conn.RemoteAddr(), err)
+		fmt.Printf("Error handling request from %s: %v\n", conn.RemoteAddr(), err)
 	}
 
 }
@@ -60,7 +60,7 @@ func handleKafkaRequest(conn net.Conn, request *KafkaRequest) error {
 	case ApiVersionAPIKEY:
 		return handleApiVersionsRequest(conn, request)
 	default:
-		return fmt.Errorf("Unsupported API Key: %d", RequestAPIKeyLenght)
+		return fmt.Errorf("unsupported API Key: %d", RequestAPIKeyLenght)
 	}
 }
 
