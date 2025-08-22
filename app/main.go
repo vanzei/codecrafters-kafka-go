@@ -42,17 +42,19 @@ func handleConnection(conn net.Conn) {
 	conn.SetWriteDeadline(time.Now().Add(WriteTimeout))
 
 	fmt.Printf("New connection from %s]\n", conn.RemoteAddr())
+	for {
+		request, err := readRequest(conn)
+		if err != nil {
+			fmt.Printf("Error reading Resuqe from %s: %v\n", conn.RemoteAddr(), err)
+			break
+		}
 
-	request, err := readRequest(conn)
-	if err != nil {
-		fmt.Printf("Error reading Resuqe from %s: %v\n", conn.RemoteAddr(), err)
+		err = handleKafkaRequest(conn, request)
+		if err != nil {
+			fmt.Printf("Error handling request from %s: %v\n", conn.RemoteAddr(), err)
+			break
+		}
 	}
-
-	err = handleKafkaRequest(conn, request)
-	if err != nil {
-		fmt.Printf("Error handling request from %s: %v\n", conn.RemoteAddr(), err)
-	}
-
 }
 
 func handleKafkaRequest(conn net.Conn, request *KafkaRequest) error {
@@ -69,10 +71,6 @@ func handleApiVersionsRequest(conn net.Conn, request *KafkaRequest) error {
 	// List all supported API keys
 	apiKeys := []ApiKeyVersion{
 		{ApiKey: 18, MinVersion: 0, MaxVersion: 4}, // ApiVersions
-		// Add more keys as needed for compatibility
-		// {ApiKey: 3, MinVersion: 0, MaxVersion: 9}, // Metadata
-		// {ApiKey: 0, MinVersion: 0, MaxVersion: 8}, // Produce
-		// {ApiKey: 1, MinVersion: 0, MaxVersion: 11}, // Fetch
 	}
 
 	response := &ApiVersionV4Response{
