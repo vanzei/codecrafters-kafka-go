@@ -22,3 +22,16 @@ type ApiKeyVersion struct {
 	MinVersion int16
 	MaxVersion int16
 }
+
+type DescribeTopic struct {
+	ApiKey     int16
+	MinVersion int16
+	MaxVersion int16
+}
+
+type DescribeTopicResponse struct {
+	CorrelationID int32
+	MinVersion    int16
+	MaxVersion    int16
+	// Add other fields as required by the protocol
+}

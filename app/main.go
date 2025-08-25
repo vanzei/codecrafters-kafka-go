@@ -61,6 +61,8 @@ func handleKafkaRequest(conn net.Conn, request *KafkaRequest) error {
 	switch request.RequestAPIKey {
 	case ApiVersionAPIKEY:
 		return handleApiVersionsRequest(conn, request)
+	// case 75:
+	// 	return handleDescribeTopicPartitionRequest(conn, request)
 	default:
 		return fmt.Errorf("unsupported API Key: %d", RequestAPIKeyLenght)
 	}
@@ -71,6 +73,7 @@ func handleApiVersionsRequest(conn net.Conn, request *KafkaRequest) error {
 	// List all supported API keys
 	apiKeys := []ApiKeyVersion{
 		{ApiKey: 18, MinVersion: 0, MaxVersion: 4}, // ApiVersions
+		{ApiKey: 75, MinVersion: 0, MaxVersion: 0},
 	}
 
 	response := &ApiVersionV4Response{
@@ -123,6 +126,9 @@ func writeApiVersionsResponse(conn net.Conn, response *ApiVersionV4Response) err
 		maxV := make([]byte, 2)
 		binary.BigEndian.PutUint16(maxV, uint16(apiKey.MaxVersion))
 		buff = append(buff, maxV...)
+
+		buff = append(buff, 0) // TAG_BUFFER
+
 		fmt.Println(buff)
 	}
 
@@ -133,9 +139,6 @@ func writeApiVersionsResponse(conn net.Conn, response *ApiVersionV4Response) err
 	throttle := make([]byte, 4)
 	binary.BigEndian.PutUint32(throttle, uint32(response.ThrottleTimeMs))
 	buff = append(buff, throttle...)
-
-	// Final TaggedFields (VARINT, usually 0)
-	buff = append(buff, 0)
 
 	// Calculate the size before prepending
 	totalLen := make([]byte, 4)
@@ -205,3 +208,45 @@ func readRequest(conn net.Conn) (*KafkaRequest, error) {
 	// clientSWVersionString := string(msgBuff[offset:lenght])
 
 }
+
+// func handleDescribeTopicPartitionRequest(conn net.Conn, request *KafkaRequest) error {
+// 	// You already have the parsed request info in `request`
+// 	// If you need more fields, extend KafkaRequest or pass the raw bytes
+
+// 	// For now, just print for debugging
+// 	fmt.Printf("Received DescribeTopicPartition request: %+v\n", request)
+
+// 	// TODO: Parse topics, partition limit, etc. from the request body if needed
+
+// 	// TODO: Construct the response struct
+// 	response := &DescribeTopicPartitionResponse{
+// 		CorrelationID: request.CorrelationID,
+// 		minVersion:    0,
+// 		maxVersion:    0,
+// 	}
+
+// 	// TODO: Serialize and write the response to conn
+// 	err := writeDescribeTopicPartitionResponse(conn, response)
+// 	return err
+
+// }
+
+// func writeDescribeTopicPartitionResponse(conn net.Conn, response *DescribeTopicResponse) error {
+// 	// Serialize response fields into a buffer
+// 	buff := make([]byte, 0)
+
+// 	// Example: Write CorrelationID
+// 	corrId := make([]byte, 4)
+// 	binary.BigEndian.PutUint32(corrId, uint32(response.CorrelationID))
+// 	buff = append(buff, corrId...)
+
+// 	// TODO: Add other fields as required
+
+// 	// Prepend message size
+// 	totalLen := make([]byte, 4)
+// 	binary.BigEndian.PutUint32(totalLen, uint32(len(buff)))
+// 	finalBuff := append(totalLen, buff...)
+
+// 	_, err := conn.Write(finalBuff)
+// 	return err
+// }
