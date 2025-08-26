@@ -6,6 +6,7 @@ type KafkaRequest struct {
 	RequestAPIVersion int16
 	CorrelationID     int32
 	ClientID          string
+	RawBody           []byte
 }
 
 type ApiVersionV4Response struct {
@@ -23,15 +24,7 @@ type ApiKeyVersion struct {
 	MaxVersion int16
 }
 
-type DescribeTopic struct {
-	ApiKey     int16
-	MinVersion int16
-	MaxVersion int16
-}
-
-type DescribeTopicResponse struct {
+type DescribeTopicPartitionResponse struct {
 	CorrelationID int32
-	MinVersion    int16
-	MaxVersion    int16
-	// Add other fields as required by the protocol
+	TopicName     string
 }

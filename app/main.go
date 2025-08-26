@@ -61,8 +61,6 @@ func handleKafkaRequest(conn net.Conn, request *KafkaRequest) error {
 	switch request.RequestAPIKey {
 	case ApiVersionAPIKEY:
 		return handleApiVersionsRequest(conn, request)
-	// case 75:
-	// 	return handleDescribeTopicPartitionRequest(conn, request)
 	default:
 		return fmt.Errorf("unsupported API Key: %d", RequestAPIKeyLenght)
 	}
@@ -105,11 +103,6 @@ func writeApiVersionsResponse(conn net.Conn, response *ApiVersionV4Response) err
 	errorCode := make([]byte, 2)
 	binary.BigEndian.PutUint16(errorCode, uint16(response.ErrorCode))
 	buff = append(buff, errorCode...)
-
-	// // Number of API Versions (1 byte) - compact array format (length + 1)
-	// // Write the arraylen code
-	// ApiVLen := []byte{byte(response.ApiVersionArrayLength)}
-	// buff = append(buff, ApiVLen...)
 
 	// ApiKeys array (compact array: varint length, then each key/min/max)
 	// For one key, varint is just 1
@@ -189,64 +182,27 @@ func readRequest(conn net.Conn) (*KafkaRequest, error) {
 		RequestAPIVersion: apiVersion,
 		CorrelationID:     correlationID,
 		ClientID:          clientID,
+		RawBody:           msgBuff,
 	}, nil
-
-	// Currently not part of the solution
-	// // Empty tagged fields for now
-	// taggedFields := byte(0)
-	// offset += 1
-
-	// bodyClientIdLength := int(msgBuff[offset])
-	// offset += 1
-
-	// bodyContent := string(msgBuff[offset : offset+int(bodyClientIdLength)])
-	// offset += bodyClientIdLength
-
-	// clientSWVersion := int(msgBuff[offset])
-	// offset += 1
-
-	// clientSWVersionString := string(msgBuff[offset:lenght])
 
 }
 
-// func handleDescribeTopicPartitionRequest(conn net.Conn, request *KafkaRequest) error {
-// 	// You already have the parsed request info in `request`
-// 	// If you need more fields, extend KafkaRequest or pass the raw bytes
+func parseDescribeTopicPartitionsRequest(body []byte) (string, error) {
 
-// 	// For now, just print for debugging
-// 	fmt.Printf("Received DescribeTopicPartition request: %+v\n", request)
+	offset := 0
 
-// 	// TODO: Parse topics, partition limit, etc. from the request body if needed
+	topicsLen := int(body[offset])
+	offset += 1
 
-// 	// TODO: Construct the response struct
-// 	response := &DescribeTopicPartitionResponse{
-// 		CorrelationID: request.CorrelationID,
-// 		minVersion:    0,
-// 		maxVersion:    0,
-// 	}
+	if topicsLen != 1 {
+		return "", fmt.Errorf("only one topic supported, got %d", topicsLen)
+	}
 
-// 	// TODO: Serialize and write the response to conn
-// 	err := writeDescribeTopicPartitionResponse(conn, response)
-// 	return err
+	//topicName
+	nameLen := int(body[offset])
+	offset += 1
+	topicName := string(body[offset : offset+nameLen])
 
-// }
+	return topicName, nil
 
-// func writeDescribeTopicPartitionResponse(conn net.Conn, response *DescribeTopicResponse) error {
-// 	// Serialize response fields into a buffer
-// 	buff := make([]byte, 0)
-
-// 	// Example: Write CorrelationID
-// 	corrId := make([]byte, 4)
-// 	binary.BigEndian.PutUint32(corrId, uint32(response.CorrelationID))
-// 	buff = append(buff, corrId...)
-
-// 	// TODO: Add other fields as required
-
-// 	// Prepend message size
-// 	totalLen := make([]byte, 4)
-// 	binary.BigEndian.PutUint32(totalLen, uint32(len(buff)))
-// 	finalBuff := append(totalLen, buff...)
-
-// 	_, err := conn.Write(finalBuff)
-// 	return err
-// }
+}
