@@ -307,7 +307,7 @@ func writeDescribeTopicPartitionResponse(conn net.Conn, response *DescribeTopicP
 	binary.BigEndian.PutUint32(totalLen, uint32(len(buff)))
 	finalBuff := append(totalLen, buff...)
 
-	//fmt.Println("Final buffer: ", finalBuff)
+	fmt.Println("Final buffer: ", finalBuff)
 	_, err := conn.Write(finalBuff)
 	return err
 }
@@ -337,15 +337,15 @@ func readRequest(conn net.Conn) (*KafkaRequest, error) {
 	offset += 4
 	clientIdLength := int16(binary.BigEndian.Uint16(msgBuff[offset : offset+2]))
 	offset += 2
-	//clientID := string(msgBuff[offset : offset+int(clientIdLength)])
+
 	clientID := ""
 	if clientIdLength > 0 {
 		clientID = string(msgBuff[offset : offset+int(clientIdLength)])
 		offset += int(clientIdLength)
 	}
-	//offset += int(clientIdLength)
+
 	body := msgBuff[offset:]
-	fmt.Printf("Parsed request: API Key: %d, Version: %d, Correlation ID: %d, Client ID: %s\n", apiKey, apiVersion, correlationID, clientID)
+	//fmt.Printf("Parsed request: API Key: %d, Version: %d, Correlation ID: %d, Client ID: %s\n", apiKey, apiVersion, correlationID, clientID)
 	return &KafkaRequest{
 		RequestAPIKey:     apiKey,
 		RequestAPIVersion: apiVersion,
