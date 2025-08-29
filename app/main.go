@@ -9,8 +9,10 @@ import (
 )
 
 // Ensures gofmt doesn't remove the "net" and "os" imports in stage 1 (feel free to remove this!)
-var _ = net.Listen
-var _ = os.Exit
+var (
+	_ = net.Listen
+	_ = os.Exit
+)
 
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -35,7 +37,6 @@ func main() {
 }
 
 func handleConnection(conn net.Conn) {
-
 	defer conn.Close()
 
 	conn.SetReadDeadline(time.Now().Add(ReadTimeout))
@@ -58,16 +59,18 @@ func handleConnection(conn net.Conn) {
 }
 
 func handleKafkaRequest(conn net.Conn, request *KafkaRequest) error {
+	fmt.Println("Handling request: ", request)
 	switch request.RequestAPIKey {
 	case ApiVersionAPIKEY:
 		return handleApiVersionsRequest(conn, request)
+	case DescribeTopicPartitionsAPIKEY:
+		return handleDescribeTopicPartitionRequest(conn, request)
 	default:
 		return fmt.Errorf("unsupported API Key: %d", RequestAPIKeyLenght)
 	}
 }
 
 func handleApiVersionsRequest(conn net.Conn, request *KafkaRequest) error {
-
 	// List all supported API keys
 	apiKeys := []ApiKeyVersion{
 		{ApiKey: 18, MinVersion: 0, MaxVersion: 4}, // ApiVersions
@@ -86,9 +89,70 @@ func handleApiVersionsRequest(conn net.Conn, request *KafkaRequest) error {
 	if request.RequestAPIVersion < 0 || request.RequestAPIVersion > 4 {
 		response.ErrorCode = UnsupportedVersionCode
 	}
-	return writeApiVersionsResponse(conn, response)
+	return writeAPIVersionsResponse(conn, response)
 }
-func writeApiVersionsResponse(conn net.Conn, response *ApiVersionV4Response) error {
+
+func handleDescribeTopicPartitionRequest(conn net.Conn, request *KafkaRequest) error {
+	fmt.Println("Handling DescribeTopicPartition request", request)
+	topicsParsed, err := parseDescribeTopicPartitionsRequest(request.RawBody)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Parsed topic name: %s\n", topicsParsed)
+
+	topics := []DescribeTopicPartitionTopic{}
+	for _, topicName := range topicsParsed {
+		topics = append(topics, DescribeTopicPartitionTopic{
+			TopicName:    topicName,
+			TopicID:      [16]byte{},
+			ErrorCode:    3,
+			Partitions:   []DescribeTopicPartitionPartition{},
+			TaggedFields: 0,
+		})
+	}
+
+	response := &DescribeTopicPartitionResponse{
+		CorrelationID: request.CorrelationID,
+		Topics:        topics,
+		TaggedFields:  0,
+	}
+
+	return writeDescribeTopicPartitionResponse(conn, response)
+}
+
+func parseDescribeTopicPartitionsRequest(body []byte) ([]string, error) {
+	offset := 1
+	topics := []string{}
+	// topics array length (compact/VARINT)
+	topicsLen := int(body[offset])
+	offset += 1
+
+	numTopic := topicsLen - 1
+	if numTopic < 1 {
+		return []string{}, fmt.Errorf("no topics in request")
+	}
+	// topic name (COMPACT_STRING)
+	for i := 0; i < numTopic; i++ {
+		nameLen := int(body[offset])
+		offset += 1
+		topicName := string(body[offset : offset+nameLen])
+		offset += nameLen
+		offset += 1
+		topics = append(topics, topicName)
+
+	}
+
+	offset += 1 // TAG_BUFFER
+
+	partitionLimit := int(binary.BigEndian.Uint32(body[offset : offset+4]))
+	offset += 4
+	fmt.Printf("Partition limit: %d\n", partitionLimit)
+
+	return topics, nil
+}
+
+func writeAPIVersionsResponse(conn net.Conn, response *ApiVersionV4Response) error {
 	fmt.Printf("Writing ApiVersions response:\n %+v\n", response)
 	// Serialize the response
 
@@ -144,6 +208,110 @@ func writeApiVersionsResponse(conn net.Conn, response *ApiVersionV4Response) err
 	return err
 }
 
+func writeDescribeTopicPartitionResponse(conn net.Conn, response *DescribeTopicPartitionResponse) error {
+	// Response format
+	// MessageSize 4bytes
+	// ResposeHeader [ CorrelationID + tag buffer] 4 + 1
+	// Describe part
+	// Throttle Time 4 bytes
+	// Topics Array [Array Len + Topics ] Array len N+1
+	// Topics -> Error Code + TopicName -> [Len + Content]  + TopicId 16 bytes 0 + isInternal 0 +
+	// Partitions array 1 byte
+	// Authorized Operations 0
+	// TopicTag 1 byte 0
+	// Next Cursor Null 1byte value 15
+	// Response tag buffer
+
+	fmt.Printf("Writing ApiVersions response:\n %+v\n", response)
+	// Serialize the response
+
+	buff := make([]byte, 0)
+
+	// Write the correlation ID
+	corrId := make([]byte, 4)
+	binary.BigEndian.PutUint32(corrId, uint32(response.CorrelationID))
+	buff = append(buff, corrId...)
+
+	//fmt.Println("Value after correlationID")
+	//fmt.Println(buff)
+
+	buff = append(buff, 0) // tag buffer
+	throttleTime := make([]byte, 4)
+	binary.BigEndian.PutUint32(throttleTime, uint32(0))
+	buff = append(buff, throttleTime...)
+
+	//fmt.Println("Value after throttleTime")
+	//fmt.Println(buff)
+
+	buff = append(buff, byte(len(response.Topics)+1))
+
+	//fmt.Println("Value after topics array length")
+	//fmt.Println(buff)
+	for _, topic := range response.Topics {
+		errorCode := make([]byte, 2)
+		binary.BigEndian.PutUint16(errorCode, uint16(3))
+		buff = append(buff, errorCode...)
+
+		//fmt.Println("Value after topic error code")
+		//fmt.Println(buff)
+
+		buff = append(buff, byte(len(topic.TopicName)+1))
+		buff = append(buff, []byte(topic.TopicName)...)
+		buff = append(buff, 0) // tag buffer after topic name
+
+		//fmt.Println("Value after topic name length")
+		//fmt.Println(buff)
+
+		buff = append(buff, topic.TopicID[:]...)
+
+		//fmt.Println("Value after topic ID")
+		//fmt.Println(buff)
+
+		buff = append(buff, 0) // isInternal
+
+		//fmt.Println("Value after isInternal")
+		//fmt.Println(buff)
+
+		buff = append(buff, 1) // partitionArray
+
+		//fmt.Println("Value after partition array length")
+		//fmt.Println(buff)
+
+		authorizedOperation := make([]byte, 4)
+		binary.BigEndian.PutUint32(authorizedOperation, uint32(0))
+		buff = append(buff, authorizedOperation...)
+
+		//fmt.Print("Value after authorized operation")
+		//fmt.Println(buff)
+
+		buff = append(buff, 0) // tagbuffer
+
+		//fmt.Println("Value after topic tag buffer")
+		//fmt.Println(buff)
+	}
+
+	// Write next_cursor as a valid empty COMPACT_STRING
+	buff = append(buff, 1) // length = 1 (VARINT)
+	buff = append(buff, 0) // tag buffer
+
+	// Write partition_index (INT32, 4 bytes, usually 0)
+	partitionIndex := make([]byte, 4)
+	binary.BigEndian.PutUint32(partitionIndex, 0)
+	buff = append(buff, partitionIndex...)
+
+	// Write tag buffer after partition_index
+	buff = append(buff, 0)
+
+	// Calculate the size before prepending
+	totalLen := make([]byte, 4)
+	binary.BigEndian.PutUint32(totalLen, uint32(len(buff)))
+	finalBuff := append(totalLen, buff...)
+
+	//fmt.Println("Final buffer: ", finalBuff)
+	_, err := conn.Write(finalBuff)
+	return err
+}
+
 func readRequest(conn net.Conn) (*KafkaRequest, error) {
 	// Read the request from the connection
 	lenBuff := make([]byte, 4)
@@ -169,40 +337,20 @@ func readRequest(conn net.Conn) (*KafkaRequest, error) {
 	offset += 4
 	clientIdLength := int16(binary.BigEndian.Uint16(msgBuff[offset : offset+2]))
 	offset += 2
-	clientID := string(msgBuff[offset : offset+int(clientIdLength)])
-
+	//clientID := string(msgBuff[offset : offset+int(clientIdLength)])
+	clientID := ""
 	if clientIdLength > 0 {
 		clientID = string(msgBuff[offset : offset+int(clientIdLength)])
 		offset += int(clientIdLength)
 	}
-
+	//offset += int(clientIdLength)
+	body := msgBuff[offset:]
 	fmt.Printf("Parsed request: API Key: %d, Version: %d, Correlation ID: %d, Client ID: %s\n", apiKey, apiVersion, correlationID, clientID)
 	return &KafkaRequest{
 		RequestAPIKey:     apiKey,
 		RequestAPIVersion: apiVersion,
 		CorrelationID:     correlationID,
 		ClientID:          clientID,
-		RawBody:           msgBuff,
+		RawBody:           body,
 	}, nil
-
-}
-
-func parseDescribeTopicPartitionsRequest(body []byte) (string, error) {
-
-	offset := 0
-
-	topicsLen := int(body[offset])
-	offset += 1
-
-	if topicsLen != 1 {
-		return "", fmt.Errorf("only one topic supported, got %d", topicsLen)
-	}
-
-	//topicName
-	nameLen := int(body[offset])
-	offset += 1
-	topicName := string(body[offset : offset+nameLen])
-
-	return topicName, nil
-
 }

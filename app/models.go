@@ -26,5 +26,20 @@ type ApiKeyVersion struct {
 
 type DescribeTopicPartitionResponse struct {
 	CorrelationID int32
-	TopicName     string
+	Topics        []DescribeTopicPartitionTopic
+	TaggedFields  byte // VARINT, usually 0
+}
+
+type DescribeTopicPartitionTopic struct {
+	TopicName    string
+	TopicID      [16]byte // UUID, all zeros for unknown topic
+	ErrorCode    int16    // 3 for unknown topic
+	Partitions   []DescribeTopicPartitionPartition
+	TaggedFields byte // VARINT, usually 0
+}
+
+type DescribeTopicPartitionPartition struct {
+	// For unknown topic, this array is empty
+	// If implemented, would include partition_index, error_code, etc.
+	// For this stage, leave empty
 }
