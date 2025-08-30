@@ -136,7 +136,8 @@ func parseDescribeTopicPartitionsRequest(body []byte) ([]string, error) {
 	for i := 0; i < numTopic; i++ {
 		nameLen := int(body[offset])
 		offset += 1
-		topicName := string(body[offset : offset+nameLen])
+		topicName := string(body[offset : offset+nameLen-1])
+		fmt.Printf("Parsed topic name: %s\n", topicName)
 		offset += nameLen
 		offset += 1
 		topics = append(topics, topicName)
@@ -209,18 +210,6 @@ func writeAPIVersionsResponse(conn net.Conn, response *ApiVersionV4Response) err
 }
 
 func writeDescribeTopicPartitionResponse(conn net.Conn, response *DescribeTopicPartitionResponse) error {
-	// Response format
-	// MessageSize 4bytes
-	// ResposeHeader [ CorrelationID + tag buffer] 4 + 1
-	// Describe part
-	// Throttle Time 4 bytes
-	// Topics Array [Array Len + Topics ] Array len N+1
-	// Topics -> Error Code + TopicName -> [Len + Content]  + TopicId 16 bytes 0 + isInternal 0 +
-	// Partitions array 1 byte
-	// Authorized Operations 0
-	// TopicTag 1 byte 0
-	// Next Cursor Null 1byte value 15
-	// Response tag buffer
 
 	fmt.Printf("Writing ApiVersions response:\n %+v\n", response)
 	// Serialize the response
@@ -240,13 +229,13 @@ func writeDescribeTopicPartitionResponse(conn net.Conn, response *DescribeTopicP
 	binary.BigEndian.PutUint32(throttleTime, uint32(0))
 	buff = append(buff, throttleTime...)
 
-	//fmt.Println("Value after throttleTime")
-	//fmt.Println(buff)
+	fmt.Println("Value after throttleTime")
+	fmt.Println(buff)
 
-	buff = append(buff, byte(len(response.Topics)+1))
+	buff = append(buff, uint8(len(response.Topics)+1))
 
-	//fmt.Println("Value after topics array length")
-	//fmt.Println(buff)
+	fmt.Println("Value after topics array length")
+	fmt.Println(buff)
 	for _, topic := range response.Topics {
 		errorCode := make([]byte, 2)
 		binary.BigEndian.PutUint16(errorCode, uint16(3))
@@ -255,17 +244,18 @@ func writeDescribeTopicPartitionResponse(conn net.Conn, response *DescribeTopicP
 		//fmt.Println("Value after topic error code")
 		//fmt.Println(buff)
 
-		buff = append(buff, byte(len(topic.TopicName)+1))
+		fmt.Println("Topic name: ", topic.TopicName)
+		buff = append(buff, uint8(len(topic.TopicName)+1))
 		buff = append(buff, []byte(topic.TopicName)...)
 		buff = append(buff, 0) // tag buffer after topic name
 
-		//fmt.Println("Value after topic name length")
-		//fmt.Println(buff)
+		fmt.Println("Value after topic name length")
+		fmt.Println(buff)
 
 		buff = append(buff, topic.TopicID[:]...)
 
-		//fmt.Println("Value after topic ID")
-		//fmt.Println(buff)
+		fmt.Println("Value after topic ID")
+		fmt.Println(buff)
 
 		buff = append(buff, 0) // isInternal
 
